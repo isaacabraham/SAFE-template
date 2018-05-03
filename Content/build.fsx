@@ -145,11 +145,7 @@ Target "ArmTemplate" (fun _ ->
     { DeploymentName = "SAFE-template-deploy"
       ResourceGroup = New(resourceGroupName, Region.Create location)
       ArmTemplate = IO.File.ReadAllText armTemplate
-      Parameters =
-        Simple
-          [ "environment", ArmString environment
-            "location", ArmString location
-            "pricingTier", ArmString pricingTier ]
+      Parameters = Simple [ "environment", ArmString environment; "location", ArmString location; "pricingTier", ArmString pricingTier ]
       DeploymentMode = Incremental }
 
   deployment
@@ -160,6 +156,20 @@ Target "ArmTemplate" (fun _ ->
     | DeploymentCompleted d -> deploymentOutputs <- d)
 )
 
+type ExtendedWebClient() =
+    inherit WebClient()
+    member val Timeout = 100000 with get, set
+    member val AllowWriteStreamBuffering = false with get, set
+    override this.GetWebRequest address =
+        let request = base.GetWebRequest address
+        if request |> isNull |> not then
+            request.Timeout <- this.Timeout
+            match request with
+            | :? HttpWebRequest as request ->
+                request.AllowWriteStreamBuffering <- this.AllowWriteStreamBuffering
+            | _ -> ()
+        request
+
 Target "AppService" (fun _ ->
   let zipFile = "deploy.zip"
   IO.File.Delete zipFile
@@ -169,7 +179,7 @@ Target "AppService" (fun _ ->
   let appPassword = deploymentOutputs.Value.WebAppPassword.value
 
   let destinationUri = sprintf "https://%s.scm.azurewebsites.net/api/zipdeploy" appName
-  let client = new Net.WebClient(Credentials = Net.NetworkCredential("$" + appName, appPassword))
+  let client = new ExtendedWebClient(Credentials = Net.NetworkCredential("$" + appName, appPassword))
   tracefn "Uploading %s to %s" zipFile destinationUri
   client.UploadData(destinationUri, IO.File.ReadAllBytes zipFile) |> ignore)
 
